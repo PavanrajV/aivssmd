@@ -1051,3 +1051,16 @@ def on_connect():
     emit('status', {'msg': 'Connected to NEXUS'})
 
 
+# ══════════════════════════════════════════════
+#  MAIN
+# ══════════════════════════════════════════════
+if __name__ == '__main__':
+    init_db()
+    get_or_create(0).start()   # auto-start cam 0
+    print("\n" + "═"*50)
+    print("  NEXUS SURVEILLANCE SYSTEM  v1.0")
+    print("  http://localhost:5000")
+    print("  Login:    admin / admin123")
+    print("  Operator: operator / op1234")
+    print("═"*50 + "\n")
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
