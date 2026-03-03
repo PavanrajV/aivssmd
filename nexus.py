@@ -909,3 +909,145 @@ window.addEventListener('DOMContentLoaded',()=>{
 </body>
 </html>"""
 
+# ══════════════════════════════════════════════
+#  ROUTES
+# ══════════════════════════════════════════════
+@app.route('/')
+def index():
+    return redirect(url_for('dashboard') if 'user_id' in session else url_for('login'))
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    if 'user_id' in session: return redirect(url_for('dashboard'))
+    error = None
+    if request.method == 'POST':
+        u, p = request.form.get('username','').strip(), request.form.get('password','')
+        conn = get_db()
+        row  = conn.execute("SELECT id,password,role FROM users WHERE username=?",(u,)).fetchone()
+        conn.close()
+        if row and check_password_hash(row['password'], p):
+            session['user_id']  = row['id']
+            session['username'] = u
+            session['role']     = row['role']
+            log_event('AUTH', f'Login: {u}')
+            return redirect(url_for('dashboard'))
+        error = 'Invalid username or password'
+        log_event('AUTH', f'Failed login: {u}', 'WARNING')
+    return render_template_string(LOGIN_HTML, error=error)
+
+@app.route('/logout')
+def logout():
+    log_event('AUTH', f"Logout: {session.get('username','?')}")
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    return render_template_string(DASHBOARD_HTML, username=session['username'], role=session.get('role','operator'))
+
+@app.route('/video_feed/<int:cid>')
+@login_required
+def video_feed(cid):
+    cam = get_or_create(cid)
+    def gen():
+        while True:
+            if cam.running:
+                f = cam.get_jpeg()
+                if f:
+                    yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + f + b'\r\n'
+            time.sleep(1/30)
+    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/camera/start', methods=['POST'])
+@login_required
+def api_cam_start():
+    cid = request.json.get('camera_id', 0)
+    return jsonify({'success': get_or_create(cid).start(), 'camera_id': cid})
+
+@app.route('/api/camera/stop', methods=['POST'])
+@login_required
+def api_cam_stop():
+    cid = request.json.get('camera_id', 0)
+    if cid in cameras: cameras[cid].stop(); return jsonify({'success': True})
+    return jsonify({'success': False})
+
+@app.route('/api/camera/add', methods=['POST'])
+@login_required
+def api_cam_add():
+    cid = len(cameras)
+    ok  = get_or_create(cid).start()
+    return jsonify({'success': ok, 'camera_id': cid, 'total': len(cameras)})
+
+@app.route('/api/camera/stats')
+@login_required
+def api_cam_stats():
+    return jsonify({cid: cam.stats() for cid, cam in cameras.items()})
+
+@app.route('/api/motion/history')
+@login_required
+def api_mot_hist():
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT strftime('%H:%M',timestamp) as t, COUNT(*) as cnt, AVG(motion_level) as avg_lvl
+        FROM motion_events WHERE timestamp >= datetime('now','-1 hour')
+        GROUP BY t ORDER BY t
+    """).fetchall()
+    conn.close()
+    return jsonify([{'time':r['t'],'count':r['cnt'],'avg':round(r['avg_lvl'],2)} for r in rows])
+
+@app.route('/api/motion/today')
+@login_required
+def api_mot_today():
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT strftime('%H',timestamp) as hr, COUNT(*) as cnt
+        FROM motion_events WHERE date(timestamp)=date('now')
+        GROUP BY hr ORDER BY hr
+    """).fetchall()
+    conn.close()
+    data = {str(h).zfill(2): 0 for h in range(24)}
+    for r in rows: data[r['hr']] = r['cnt']
+    return jsonify(data)
+
+@app.route('/api/alerts/recent')
+@login_required
+def api_alerts():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM motion_events ORDER BY timestamp DESC LIMIT 30").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/system/stats')
+@login_required
+def api_sys_stats():
+    cpu = mem = dsk = 0
+    try:
+        import psutil
+        cpu = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory().percent
+        dsk = psutil.disk_usage('/').percent
+    except: pass
+    conn = get_db()
+    tc = conn.execute("SELECT COUNT(*) as c FROM motion_events WHERE date(timestamp)=date('now')").fetchone()['c']
+    ac = conn.execute("SELECT COUNT(*) as c FROM motion_events").fetchone()['c']
+    conn.close()
+    return jsonify({'cpu':cpu,'memory':mem,'disk':dsk,'today_alerts':tc,'total_alerts':ac,
+                    'cameras_online':sum(1 for c in cameras.values() if c.online),
+                    'cameras_total':len(cameras)})
+
+@app.route('/api/system/logs')
+@login_required
+def api_sys_logs():
+    conn = get_db()
+    rows = conn.execute("SELECT timestamp,event_type,severity,message FROM system_logs ORDER BY id DESC LIMIT 50").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+# ── SOCKETIO ──────────────────────────────────
+@socketio.on('connect')
+def on_connect():
+    if 'user_id' not in session: return False
+    emit('status', {'msg': 'Connected to NEXUS'})
+
+
