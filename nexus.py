@@ -227,3 +227,21 @@ class Camera:
             'last_motion':  self.last_motion.strftime('%H:%M:%S') if self.last_motion else None,
         }
 
+# ══════════════════════════════════════════════
+#  REGISTRY
+# ══════════════════════════════════════════════
+cameras: dict = {}
+
+def get_or_create(cid):
+    if cid not in cameras:
+        cameras[cid] = Camera(cid)
+    return cameras[cid]
+
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def dec(*a, **kw):
+        if 'user_id' not in session:
+            return jsonify({'error':'Unauthorized'}),401 if request.is_json else redirect(url_for('login'))
+        return f(*a,**kw)
+    return dec
