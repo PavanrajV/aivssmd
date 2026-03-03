@@ -14,6 +14,7 @@
 """
 
 # ─── pip install flask flask-socketio opencv-python-headless numpy werkzeug psutil eventlet ───
+
 import cv2, numpy as np, threading, time, sqlite3, os, json
 from datetime import datetime
 from flask import Flask, render_template_string, Response, request, jsonify, redirect, url_for, session
@@ -1049,7 +1050,6 @@ def api_sys_logs():
 def on_connect():
     if 'user_id' not in session: return False
     emit('status', {'msg': 'Connected to NEXUS'})
-
 
 # ══════════════════════════════════════════════
 #  MAIN
