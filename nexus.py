@@ -25,3 +25,51 @@ app.secret_key = 'nexus_surveillance_xK9mP_2024'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 DB_PATH  = 'nexus_surveillance.db'
 
+# ══════════════════════════════════════════════
+#  DATABASE
+# ══════════════════════════════════════════════
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT DEFAULT 'operator',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS motion_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            camera_id INTEGER DEFAULT 0,
+            camera_name TEXT DEFAULT 'CAM-01',
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            motion_level REAL DEFAULT 0,
+            duration_ms INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS system_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            event_type TEXT,
+            severity TEXT DEFAULT 'INFO',
+            message TEXT
+        );
+    """)
+    for uname, pwd, role in [('admin','admin123','admin'),('operator','op1234','operator')]:
+        try:
+            conn.execute("INSERT INTO users (username,password,role) VALUES (?,?,?)",
+                         (uname, generate_password_hash(pwd), role))
+        except: pass
+    conn.commit(); conn.close()
+
+def log_event(etype, msg, sev='INFO'):
+    try:
+        conn = get_db()
+        conn.execute("INSERT INTO system_logs (event_type,severity,message) VALUES (?,?,?)", (etype,sev,msg))
+        conn.commit(); conn.close()
+    except: pass
+
